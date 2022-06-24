@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
 	"reflect"
@@ -57,6 +58,7 @@ func create_info(c *gin.Context) {
 	info := make(map[string]interface{})
 	bind_err := c.ShouldBind(&info)
 	if bind_err != nil {
+		log.Println("invaild json format")
 		c.JSON(http.StatusBadRequest, gin.H{"msg": bind_err.Error()})
 		return
 	}
@@ -142,6 +144,7 @@ func main() {
 		id := c.Param("id")
 		data, _ := rds.Do("GET", id)
 		if data == nil {
+			log.Println("trying to get non-existent resources")
 			c.JSON(http.StatusNotFound, gin.H{"msg": "id not exists"})
 			return
 		}
@@ -193,6 +196,7 @@ func main() {
 		id := c.Param("id")
 		data, _ := rds.Do("GET", id)
 		if data == nil {
+			log.Println("trying to get non-existent resources")
 			c.JSON(http.StatusNotFound, gin.H{"msg": "id not exists"})
 			return
 		}
