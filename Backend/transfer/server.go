@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gomodule/redigo/redis"
+	"github.com/huichen/sego"
 )
 
 var rds redis.Conn
@@ -52,7 +53,7 @@ func convert_to_string_arr(ifs interface{}) []string {
 	}
 	return arr
 }
-func create_info(c *gin.Context) {
+func create_public_info(c *gin.Context, segmenter sego.Segmenter) {
 	id := generate_unique_id()
 	// var info Infomation
 	info := make(map[string]interface{})
@@ -81,6 +82,47 @@ func create_info(c *gin.Context) {
 	if info["expire"] != nil {
 		rds.Do("EXPIRE", id, info["expire"])
 	}
+	//进行分词,存储到搜索标签下
+	text := []byte(fmt.Sprintf("%s", info["data"]))
+	segments := segmenter.Segment(text)
+	//开启搜索模式
+	search_keys := sego.SegmentsToSlice(segments, true)
+	for i := 0; i < len(search_keys); i++ {
+		//一一添加到search中
+		rds.Do("SADD", "search/"+search_keys[i], id)
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+func create_private_info(c *gin.Context) {
+	id := generate_unique_id()
+	// var info Infomation
+	info := make(map[string]interface{})
+	bind_err := c.ShouldBind(&info)
+	if bind_err != nil {
+		log.Println("invaild json format")
+		c.JSON(http.StatusBadRequest, gin.H{"msg": bind_err.Error()})
+		return
+	}
+	//
+	switch reflect.TypeOf(info["tags"]).Kind() {
+	case reflect.Slice:
+		tags_array := reflect.ValueOf(info["tags"])
+		for i := 0; i < tags_array.Len(); i++ {
+			// tag 代表集合
+			// 向集合里添加成员
+			rds.Do("SADD", tags_array.Index(i), id)
+			// 同时也记录下该信息的tags
+			rds.Do("SADD", id+"/tags", tags_array.Index(i))
+		}
+	}
+	//
+	data, _ := json.Marshal(info["data"])
+	rds.Do("SET", id, data)
+	//
+	if info["expire"] != nil {
+		rds.Do("EXPIRE", id, info["expire"])
+	}
+
 	c.JSON(http.StatusOK, gin.H{"id": id})
 }
 func update_command() {
@@ -128,6 +170,11 @@ func main() {
 	private := router.Group("/private")
 	router.Use(CrosHandler())
 
+	//初始化分词器
+	// 载入词典
+	var segmenter sego.Segmenter
+	segmenter.LoadDictionary("./dictionary.txt")
+
 	// 全局连接服务器
 	go connServer.run()
 	router.GET("/init", func(c *gin.Context) {
@@ -138,7 +185,7 @@ func main() {
 	//设置响应头
 	private.Use(CrosHandler())
 	private.POST("/", func(c *gin.Context) {
-		create_info(c)
+		create_private_info(c)
 	})
 	private.GET("id/:id", func(c *gin.Context) {
 		id := c.Param("id")
@@ -190,7 +237,22 @@ func main() {
 	//设置响应头
 	public.Use(CrosHandler())
 	public.POST("/", func(c *gin.Context) {
-		create_info(c)
+		create_public_info(c, segmenter)
+	})
+	public.GET("search/:str", func(c *gin.Context) {
+		str := c.Param("str")
+		//进行分词,存储到搜索标签下
+		text := []byte(str)
+		segments := segmenter.Segment(text)
+		//开启搜索模式
+		keys := sego.SegmentsToSlice(segments, true)
+		key_arr := make([]interface{}, 0)
+		for i := 0; i < len(keys); i++ {
+			key_arr = append(key_arr, "search/"+keys[i])
+		}
+		ids, _ := rds.Do("SUNION", key_arr...)
+		id_arr := convert_to_string_arr(ids)
+		c.JSON(http.StatusOK, gin.H{"data": id_arr})
 	})
 	public.GET("id/:id", func(c *gin.Context) {
 		id := c.Param("id")
