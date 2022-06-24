@@ -124,8 +124,6 @@ func main() {
 
 	public := router.Group("/public")
 	private := router.Group("/private")
-
-	//设置响应头
 	router.Use(CrosHandler())
 
 	// 全局连接服务器
@@ -135,6 +133,8 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{"msg": "ok"})
 	})
+	//设置响应头
+	private.Use(CrosHandler())
 	private.POST("/", func(c *gin.Context) {
 		create_info(c)
 	})
@@ -184,6 +184,8 @@ func main() {
 	private.GET("/websocket", func(c *gin.Context) {
 		websocketServer(c.Writer, c.Request)
 	})
+	//设置响应头
+	public.Use(CrosHandler())
 	public.POST("/", func(c *gin.Context) {
 		create_info(c)
 	})
